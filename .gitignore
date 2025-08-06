@@ -34,3 +34,4 @@ build/
 
 # Maven local toolchains (machine-specific)
 .mvn/toolchains.xml
+bench/app.log

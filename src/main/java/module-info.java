@@ -1,5 +1,6 @@
 module com.jpms.example {
     requires java.base;
+    requires java.management; // for MemoryMXBean and java.lang.management
 
     // Spring Boot core
     requires spring.boot;

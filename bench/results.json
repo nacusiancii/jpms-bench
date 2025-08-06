@@ -1,0 +1,17 @@
+[
+{
+  "timestamp": "2025-08-06T18:23:31Z",
+  "variant": "jpms-java24-boot4-min",
+  "build_ms": 16434,
+  "jar_bytes": 54774909,
+  "runs": 3,
+  "averages": {
+    "launch_ms": 15245,
+    "heapUsed": 62043138,
+    "heapCommitted": 92973738,
+    "heapMax": 4236247040,
+    "nonHeapUsed": 100586312,
+    "nonHeapCommitted": 102476458
+  }
+}
+]
