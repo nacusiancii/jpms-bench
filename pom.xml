@@ -29,6 +29,7 @@
 	<properties>
 		<java.version>24</java.version>
 		<maven.compiler.release>24</maven.compiler.release>
+		<maven.jlink.plugin.version>3.4.1</maven.jlink.plugin.version>
 	</properties>
 	<dependencies>
 		<dependency>
@@ -92,5 +93,41 @@
 			</plugin>
 		</plugins>
 	</build>
-
+	
+	<profiles>
+		<profile>
+			<id>jlink</id>
+			<build>
+				<plugins>
+					<plugin>
+						<groupId>org.apache.maven.plugins</groupId>
+						<artifactId>maven-jlink-plugin</artifactId>
+						<version>${maven.jlink.plugin.version}</version>
+						<configuration>
+							<stripDebug>true</stripDebug>
+							<noHeaderFiles>true</noHeaderFiles>
+							<noManPages>true</noManPages>
+							<compress>2</compress>
+							<!-- The JPMS main class (module/name of main). Spring Boot’s launcher works with module main -->
+							<launcher>example=com.jpms.example/com.jpms.example.ExampleApplication</launcher>
+							<!-- Put image under bench/runtime -->
+							<imageName>runtime</imageName>
+							<outputDirectory>${project.basedir}/bench</outputDirectory>
+							<!-- Use the jlink from the running JDK -->
+							<jlinkExecutable>${java.home}/bin/jlink</jlinkExecutable>
+						</configuration>
+						<executions>
+							<execution>
+								<id>make-runtime</id>
+								<phase>package</phase>
+								<goals>
+									<goal>jlink</goal>
+								</goals>
+							</execution>
+						</executions>
+					</plugin>
+				</plugins>
+			</build>
+		</profile>
+	</profiles>
 </project>
