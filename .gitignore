@@ -31,3 +31,7 @@ build/
 
 ### VS Code ###
 .vscode/
+
+# Maven local toolchains (machine-specific)
+.mvn/toolchains.xml
+bench/app.log
