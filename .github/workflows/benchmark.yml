@@ -72,7 +72,9 @@ jobs:
           mkdir -p bench
           echo "[]" > "${JSON_RESULTS}"
 
-          # Start app
+          # Start timer, then app
+          start_ns=$(date +%s%N)
+
           echo "Starting app on port ${PORT}"
           nohup "${JDK_HOME}/bin/java" -jar "${ARTIFACT_JAR}" --server.port="${PORT}" > "${APP_LOG}" 2>&1 &
           APP_PID=$!
@@ -87,6 +89,10 @@ jobs:
             sleep 0.25
           done
 
+          # Compute launch time in ms from process start to readiness
+          end_ns=$(date +%s%N)
+          launch_ms=$(( (end_ns - start_ns) / 1000000 ))
+
           # Collect a single snapshot similar to measure.sh's output schema
           payload="$(curl -fsS "http://127.0.0.1:${PORT}/ping" || true)"
           ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -96,8 +102,6 @@ jobs:
           parse_field () {
             echo "$payload" | sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\\([0-9][0-9]*\\).*/\\1/p" | head -n1
           }
-
-          launch_ms=0
           heapUsed="$(parse_field heapUsed)"
           heapCommitted="$(parse_field heapCommitted)"
           heapMax="$(parse_field heapMax)"
