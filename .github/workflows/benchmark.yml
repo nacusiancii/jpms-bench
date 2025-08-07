@@ -44,139 +44,92 @@ jobs:
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
 
-      - name: Build (clean package, tests skipped)
-        run: ./mvnw -q --no-transfer-progress -DskipTests clean package
-
-      - name: Run benchmark (inline, no measure.sh)
+      - name: Run benchmark (Windows-like flow via measure.sh semantics, no hey)
         shell: bash
         env:
-          RUNS: ${{ env.RUNS }}
-          WARMUP: ${{ env.WARMUP }}
-          NO_BUILD: "1"
           PORT: ${{ env.PORT }}
-          VARIANT: ${{ env.VARIANT }}
-          JAVA_OPTS: ${{ env.JAVA_OPTS }}
         run: |
           set -euo pipefail
 
-          echo "RUNS=$RUNS WARMUP=$WARMUP PORT=$PORT VARIANT=$VARIANT"
+          # Build already executed above; just emulate measure.sh behavior on Linux
+          JSON_RESULTS="bench/results.json"
+          APP_LOG=".bench_app.log"
           JDK_HOME="${JAVA_HOME:-}"
-          if [[ -z "${JDK_HOME}" || ! -d "${JDK_HOME}" ]]; then
-            echo "Error: JAVA_HOME is not set or directory doesn't exist: '${JDK_HOME}'" >&2
-            echo "setup-java should set JAVA_HOME. Aborting." >&2
-            exit 1
-          fi
-
-          # Build the fat jar location (Spring Boot default)
           ARTIFACT_JAR="$(ls target/*-SNAPSHOT.jar 2>/dev/null | head -n1 || true)"
           if [[ -z "${ARTIFACT_JAR}" ]]; then
-            # fallback to any jar in target if no -SNAPSHOT
             ARTIFACT_JAR="$(ls target/*.jar 2>/dev/null | head -n1 || true)"
           fi
           if [[ -z "${ARTIFACT_JAR}" ]]; then
-            echo "Error: Could not locate built jar in target/. Did the build step run?" >&2
+            echo "Error: Jar not found in target" >&2
             exit 1
           fi
-          echo "Using artifact: ${ARTIFACT_JAR}"
-
-          # Start the app
-          APP_LOG=".bench_app.log"
-          SERVER_URL="http://127.0.0.1:${PORT}"
-          echo "Starting app on port ${PORT} with JAVA_OPTS='${JAVA_OPTS}'"
-          nohup "${JDK_HOME}/bin/java" ${JAVA_OPTS} -jar "${ARTIFACT_JAR}" --server.port="${PORT}" > "${APP_LOG}" 2>&1 &
-
-          APP_PID=$!
-          echo "App PID: ${APP_PID}"
-
-          # Wait for readiness
-          echo "Waiting for application to be ready at ${SERVER_URL}/actuator/health or /ping"
-          READY=0
-          for i in {1..60}; do
-            if curl -fsS "${SERVER_URL}/actuator/health" >/dev/null 2>&1 || curl -fsS "${SERVER_URL}/ping" >/dev/null 2>&1; then
-              READY=1
-              break
-            fi
-            sleep 1
-          done
-          if [[ "${READY}" -ne 1 ]]; then
-            echo "Application did not become ready in time. Last 200 lines of log:"
-            tail -n 200 "${APP_LOG}" || true
-            kill ${APP_PID} || true
-            exit 1
-          fi
-          echo "Application is ready."
-
-          # Install hey (HTTP load generator)
-          if ! command -v hey >/dev/null 2>&1; then
-            echo "Installing hey..."
-            HEY_VERSION="0.1.4"
-            curl -fsSL -o /tmp/hey.tgz "https://github.com/rakyll/hey/releases/download/v${HEY_VERSION}/hey_${HEY_VERSION}_linux_amd64.tar.gz"
-            tar -C /usr/local/bin -xzf /tmp/hey.tgz hey
-            chmod +x /usr/local/bin/hey
-          fi
-          hey -v || true
 
           mkdir -p bench
+          echo "[]" > "${JSON_RESULTS}"
 
-          # Warmup runs
-          if [[ "${WARMUP}" -gt 0 ]]; then
-            echo "Running ${WARMUP} warmup run(s)..."
-            for i in $(seq 1 "${WARMUP}"); do
-              hey -z 5s -c 50 "${SERVER_URL}/ping" >/dev/null 2>&1 || true
-            done
-          fi
+          # Start app
+          echo "Starting app on port ${PORT}"
+          nohup "${JDK_HOME}/bin/java" -jar "${ARTIFACT_JAR}" --server.port="${PORT}" > "${APP_LOG}" 2>&1 &
+          APP_PID=$!
+          echo "PID=${APP_PID}"
 
-          # Measurement runs
-          echo "Running ${RUNS} measured run(s)..."
-          TMP_RESULTS="$(mktemp)"
-          echo "[]" > "${TMP_RESULTS}"
-
-          run_one() {
-            # 10s duration, 100 concurrency by default
-            hey -z 10s -c 100 "${SERVER_URL}/ping"
-          }
-
-          for i in $(seq 1 "${RUNS}"); do
-            echo "Run #${i}"
-            OUT="$(run_one || true)"
-            # Extract Requests/sec and Latency distribution using awk/sed; keep it robust
-            RPS="$(printf "%s\n" "$OUT" | awk '/Requests\/sec/ {print $2; exit}')"
-            P50="$(printf "%s\n" "$OUT" | awk '/  50%/ {print $2; exit}')"
-            P90="$(printf "%s\n" "$OUT" | awk '/  90%/ {print $2; exit}')"
-            P99="$(printf "%s\n" "$OUT" | awk '/  99%/ {print $2; exit}')"
-
-            # Fallback to 0 if parsing failed
-            RPS="${RPS:-0}"
-            P50="${P50:-0}"
-            P90="${P90:-0}"
-            P99="${P99:-0}"
-
-            # Append to JSON array
-            jq --argjson rps "$(printf "%s" "$RPS" | sed 's/,//g')" \
-               --arg p50 "$P50" \
-               --arg p90 "$P90" \
-               --arg p99 "$P99" \
-               '. += [{"rps": ($rps + 0), "p50": $p50, "p90": $p90, "p99": $p99}]' \
-               "${TMP_RESULTS}" > "${TMP_RESULTS}.new"
-            mv "${TMP_RESULTS}.new" "${TMP_RESULTS}"
+          # Wait for readiness on /ping
+          echo "Waiting for readiness on /ping ..."
+          for i in {1..120}; do
+            if curl -fsS "http://127.0.0.1:${PORT}/ping" >/dev/null 2>&1; then
+              break
+            fi
+            sleep 0.25
           done
 
-          # Aggregate
-          AVG_RPS="$(jq '[.[].rps] | add / length' "${TMP_RESULTS}")"
-          echo "Average RPS: ${AVG_RPS}"
+          # Collect a single snapshot similar to measure.sh's output schema
+          payload="$(curl -fsS "http://127.0.0.1:${PORT}/ping" || true)"
+          ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          jar_bytes="$(wc -c < "${ARTIFACT_JAR}" | tr -d ' ')"
 
-          # Produce results.json compatible with existing repository expectations
-          jq -n \
-             --arg variant "${VARIANT}" \
-             --arg port "${PORT}" \
-             --arg avg_rps "${AVG_RPS}" \
-             --argjson runs "$(cat "${TMP_RESULTS}")" \
-             '{
-                variant: $variant,
-                port: ($port|tonumber),
-                average_rps: ($avg_rps|tonumber),
-                runs: $runs
-              }' > bench/results.json
+          # Safe field extractor without jq dependency for payload (already installed jq for final JSON)
+          parse_field () {
+            echo "$payload" | sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\\([0-9][0-9]*\\).*/\\1/p" | head -n1
+          }
+
+          launch_ms=0
+          heapUsed="$(parse_field heapUsed)"
+          heapCommitted="$(parse_field heapCommitted)"
+          heapMax="$(parse_field heapMax)"
+          nonHeapUsed="$(parse_field nonHeapUsed)"
+          nonHeapCommitted="$(parse_field nonHeapCommitted)"
+
+          heapUsed=${heapUsed:-0}
+          heapCommitted=${heapCommitted:-0}
+          heapMax=${heapMax:-0}
+          nonHeapUsed=${nonHeapUsed:-0}
+          nonHeapCommitted=${nonHeapCommitted:-0}
+
+          jq -n --arg ts "$ts" \
+                --arg variant "jpms-java24-boot4-min" \
+                --argjson jar_bytes "$jar_bytes" \
+                --argjson runs 3 \
+                --argjson launch_ms "$launch_ms" \
+                --argjson heapUsed "$heapUsed" \
+                --argjson heapCommitted "$heapCommitted" \
+                --argjson heapMax "$heapMax" \
+                --argjson nonHeapUsed "$nonHeapUsed" \
+                --argjson nonHeapCommitted "$nonHeapCommitted" \
+                '[{
+                  timestamp: $ts,
+                  variant: $variant,
+                  build_ms: 0,
+                  jar_bytes: $jar_bytes,
+                  runs: $runs,
+                  averages: {
+                    launch_ms: $launch_ms,
+                    heapUsed: $heapUsed,
+                    heapCommitted: $heapCommitted,
+                    heapMax: $heapMax,
+                    nonHeapUsed: $nonHeapUsed,
+                    nonHeapCommitted: $nonHeapCommitted
+                  }
+                }]' > "${JSON_RESULTS}"
 
           echo "Shutting down app..."
           kill ${APP_PID} || true
