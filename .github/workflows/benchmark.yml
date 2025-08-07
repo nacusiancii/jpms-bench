@@ -58,7 +58,7 @@ jobs:
           JAVA_OPTS: ${{ env.JAVA_OPTS }}
         run: |
           echo "RUNS=$RUNS WARMUP=$WARMUP PORT=$PORT VARIANT=$VARIANT"
-          bash bench/measure.sh "/usr/lib/jvm/temurin-24-jdk" "$PORT"
+          bash bench/measure.sh "${JAVA_HOME:-$JAVA_HOME_24_X64}" "$PORT"
 
       - name: Show results
         run: |
